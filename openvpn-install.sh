@@ -944,11 +944,8 @@ function configureVPN () {
 	mkdir /etc/openvpn/vpn_clients
 
 	echo "Moving Python programs to /etc/openvpn "
-	cp $PWD/mkclient.py 	/etc/openvpn/
-	cp $PWD/mkpasswd.py	/etc/openvpn
-	
-	cp ~/mkclient.py 	/etc/openvpn/
-	cp ~/mkpasswd.py	/etc/openvpn
+	find . -iname mkclient.py -exec cp {} /etc/openvpn/mkclient.py \;
+	find . -iname mkpasswd.py -exec cp {} /etc/openvpn/mkpasswd.py \;
 		
 
 	echo "Ccnfiguring Easyrsa.... "
