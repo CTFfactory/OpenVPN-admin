@@ -4,6 +4,8 @@
 # https://github.com/huzar01/OpenVPN
 # Credit to https://github.com/angristan/openvpn-install
 
+CRTDIR=$PWD
+
 function isRoot () {
 	if [ "$EUID" -ne 0 ]; then
 		return 1
@@ -937,6 +939,8 @@ fi
 }
 
 function configureVPN () {
+	cd $CRTDIR
+
 	echo "Creating directories for OpenVPN python client program "
 	echo "John,Doe,JohnD@example.com" >> /etc/openvpn/client-creation.txt
 	echo "John" >> /etc/openvpn/client-remove.txt
@@ -949,8 +953,8 @@ function configureVPN () {
 	find . -iname mkclient.py -exec cp {} /etc/openvpn/mkclient.py \;
 	find . -iname mkpasswd.py -exec cp {} /etc/openvpn/mkpasswd.py \;
 	
-	cp $PWD/OpenVPN/mkclient.py /etc/openvpn/mkclient.py
-	cp $PWD/OpenVPN/mkpasswd.py /etc/openvpn/mkpasswd.py
+#	cp $PWD/OpenVPN/mkclient.py /etc/openvpn/mkclient.py
+#	cp $PWD/OpenVPN/mkpasswd.py /etc/openvpn/mkpasswd.py
 
 
 	echo "Ccnfiguring Easyrsa.... "
