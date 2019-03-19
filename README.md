@@ -50,5 +50,5 @@ Add the client names to client-remove.txt -> /etc/openvpn/client-remove.txt<br /
 **mkclient.py -r client-remove.txt** <br />
 You can create your own text file (client-remove.txt is the default)<br />
 
-
-Credit to angristan, installer is a modified version of angristan openvpn-install<br />
+## Credit 
+Credit to angristan and Nyr, installer is a modified version of angristan openvpn-install<br />
