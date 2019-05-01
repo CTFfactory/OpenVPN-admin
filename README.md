@@ -7,7 +7,7 @@ Installs OpenVPN community verison
 </ul>
 
 ## Step 1: Download repo
-Git clone https://github.com/huzar/OpenVPN
+Git clone https://github.com/huzar01/OpenVPN
 
 ## Step 2: Run installer 
 Run **openvpn-install.sh** <br />
