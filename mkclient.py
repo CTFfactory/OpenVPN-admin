@@ -131,7 +131,7 @@ def create_client():
         client_info = open('/etc/openvpn/vpn_clients/%s.info' % name, "w")
         with open('/etc/openvpn/vpn_clients/%s.info' % name, mode='a') as info:
             info.write('OpenVPN client information:\n------------------------------------')
-            info.write('\nUsernmaer: ' + name + '\nLastname: ' + last + '\nEmail: ' + email)
+            info.write('\nUsername: ' + name + '\nLastname: ' + last + '\nEmail: ' + email)
             info.write('\nPassword: %s ' % password + '\n------------------------------------\n')
 
         # Email out the ovpn files and information.
