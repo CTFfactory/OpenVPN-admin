@@ -161,5 +161,6 @@ def main():
     #"Argument is = to -s or --show do:"
     elif args.show:
         check_client()
-
+    else:
+        print('Please add the required text file as an arguement using the correct flag')
 main()
