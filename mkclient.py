@@ -40,40 +40,45 @@ def check_client():
         f.close()
         print('Name of clients on vpn server:\n%s' % list_clients)
 
-def revoke_client():
+def remove_client():
     for client in removedata:
         print (client)
-        os.chdir('/etc/openvpn/easy-rsa')
         # easyrsa function that revokes client cert
         os.system('tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep "^V" | cut -d "=" -f 2 > /etc/openvpn/rc-names.txt' )
         f = open('/etc/openvpn/rc-names.txt', 'r')
         list_clients = (f.read())
         f.close()
-        
         if client in list_clients:
+            newpath = ('/etc/openvpn/graveyard/%s' % client)
+            if not os.path.exists(newpath):
+                os.makedirs(newpath)
+            os.chdir('/etc/openvpn/easy-rsa')
             os.system('./easyrsa --batch revoke "%s"' % client)
             os.system('EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl')
-            print('remove req')
-            os.system('rm -f "pki/reqs/%s.req"' % client)
-            print('remove private')
-            os.system('rm -f "pki/private/%s.key"' % client)
-            print('remove issued')
-            os.system('rm -f "pki/issued/%s.crt"' % client)
-            os.system('rm -f /etc/openvpn/crl.pem')
+            # Not important just send sout updated crl to this folder
+            
+            os.system('cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/revoked_certs')
+            print('moved req')
+            os.system('mv "pki/reqs/%s.req" /etc/openvpn/graveyard/%s' % (client,client))
+            print('moved private')
+            os.system('mv "pki/private/%s.key" /etc/openvpn/graveyard/%s' % (client,client))
+            print('moved issued')
+            os.system('mv "pki/issued/%s.crt" /etc/openvpn/graveyard/%s' % (client,client))
+            os.system('rm /etc/openvpn/crl.pem')
             os.system('cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem')
             os.system('chmod 644 /etc/openvpn/crl.pem')
-            os.system('find /home/ -maxdepth 2 -name "%s.ovpn" -delete' % client)
-            os.system('rm -f "/etc/openvpn/vpn_clients/%s.ovpn" ' % client)
-            os.system('rm -f "/etc/openvpn/vpn_clients/%s.info" ' % client)
+#            os.system('find /home/ -maxdepth 2 -name "%s.ovpn" -delete' % client)
+            os.system('mv "/etc/openvpn/vpn_clients/%s.ovpn" /etc/openvpn/graveyard/%s' % (client,client))
+            os.system('mv "/etc/openvpn/vpn_clients/%s.info" /etc/openvpn/graveyard/%s' % (client,client))
             os.system('sed -i "s|^%s,.*||" /etc/openvpn/iplist.txt' % client)
             os.system('sed -i "s/%s//g" /etc/openvpn/authorized_users' % client)            
             os.system('sed -i "/^$/d" /etc/openvpn/authorized_users')
             print ("Removed %s from authorized_users" % client)
-            print ("Removed %s.ovpn and %s.info from /etc/openvpn/vpn_clients." % (client, client))
+            print ("moved  %s.ovpn and %s.info from /etc/openvpn/graveyard." % (client, client))
             print ("Certificate for client %s revoked." % client)
         else:
             print ("\nClient not found! Continuing to next client...\n")
-            continue 
+            continue
 
 def disable_client():
     for client in removedata:
@@ -191,7 +196,12 @@ def sendit(name, last, to_email, password):
     # Email Server 
     # 10.20.31.78 = cyberwildcats.net
     # 10.20.31.75 = prosversusjoes.net
-        
+
+#    emtemp = open("/etc/openvpn/email-template.txt", "r")
+#    email_template = emtemp.read()
+
+    
+    
     mailserver = "10.20.31.75"
     #mailserver = "10.20.31.78"
     fr_email = "dichotomy@prosversusjoes.net"
@@ -199,6 +209,7 @@ def sendit(name, last, to_email, password):
     #reply_email = "eric.i.arnoth@wilmu.edu"
     reply_email = "dichotomy@prosversusjoes.net"
     subj = "Your OpenVPN credentials for Cyberwildcats"
+    
     email_template="""%s %s - here is your Username and PEM Password for VPN access.
 
     OpenVPN Credentials:
@@ -207,6 +218,7 @@ def sendit(name, last, to_email, password):
     
 
     """
+
     body = email_template % (name, last, name, password)
     body = MIMEText(body)
     msg = MIMEMultipart()
@@ -230,11 +242,11 @@ def sendit(name, last, to_email, password):
     print( "Sending mail to %s" % to_email)
     s.sendmail(fr_email, [reply_email, to_email], msg.as_string())
     s.quit()
-
+#    emtemp.close()
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-c", "--create", dest="clientFile", help="Open specified file to add clients")
-    parser.add_argument("-r", "--revoke", dest="revokeFile", help="Open specified file to remove clients")
+    parser.add_argument("-r", "--revoke", dest="removeFile", help="Open specified file to remove clients")
     parser.add_argument("-d", "--disable", dest="disableFile", help="Open specified file to disable clients")
     parser.add_argument("-e", "--enable", dest="enableFile", help="Open specified file to enable clients")
     parser.add_argument("-s", "--show",   action='store_true', help="Displays total number and names of active clients")
@@ -242,7 +254,7 @@ def main():
     clientFile = args.clientFile
     disableFile = args.disableFile
     enableFile = args.enableFile
-    revokeFile = args.revokeFile
+    removeFile = args.removeFile
 
     #"Argument is = to -c or --create do:"
     if args.clientFile:
@@ -251,11 +263,11 @@ def main():
             userdata = [x.strip().split(',') for x in f.readlines()]
         create_client()
     #"Argument is = to -r or --revoke do:"
-    elif args.revokeFile:
+    elif args.removeFile:
         global removedata
-        with open(revokeFile) as f:
+        with open(removeFile) as f:
             removedata = f.read().splitlines()
-        revoke_client()
+        remove_client()
     #"Argument is = to -d or --disable do:"
     elif args.disableFile:
         with open(disableFile) as f:
