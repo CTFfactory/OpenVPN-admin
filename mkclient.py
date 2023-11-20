@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 import sys,os,shutil,subprocess,random,argparse
+from datetime import date
 from shutil import copyfile
 from random import randrange
 from mkpasswd import pwlist
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email.mime.multipart import MIMEMultipart
-from email import encoders
-from subprocess import Popen, PIPE, STDOUT
-import email.utils
-from email.utils import formatdate
+from mkemail import sendit
 
 '''
 Generate clients with cert and password authentication 
@@ -18,9 +12,10 @@ Script takes one arugement being a text file with 3 variables delimited by comma
 EX: matt,young,matty01@example.com
 Uses easyrsa to create a client.ovpn config with a cert and randomly generated password, using a list from mkpasswd.py 
 Information about client is stored in /etc/openvpn/vpn_clients/
+
+To use cyberwildcats email use the -S <cyber> flag, default without the flag is PVJ email
+
 '''
-userdata = ' '
-removedata = ' ' 
 
 def check_client():
     os.system('tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep V | cut -d "/" -f2 | wc -l > /etc/openvpn/easy-rsa/pki/outindex.txt')
@@ -40,7 +35,7 @@ def check_client():
         f.close()
         print('Name of clients on vpn server:\n%s' % list_clients)
 
-def remove_client():
+def remove_client(removedata):
     for client in removedata:
         print (client)
         # easyrsa function that revokes client cert
@@ -80,49 +75,82 @@ def remove_client():
             print ("\nClient not found! Continuing to next client...\n")
             continue
 
-def disable_client():
+def disable_client(removedata):
     for client in removedata:
         os.chdir('/etc/openvpn/')
         #check if client name is in authorized_users already
         f = open('/etc/openvpn/authorized_users')
-        
         authorized = (f.read())
-        if ('#'+client) in authorized:
+
+        if ('#'+client) in authorized and client == client:
             print("\nClient:%s is already disabled!" % client)
         elif client not in authorized:
             print("\nClient:%s not found!" % client)
         else:
-            print("\nClient:%s now disabled!" % client)
-            #os.system('echo "%s" >> "/etc/openvpn/authorized_users"' % client)
-            os.system('sed -i -e "s/%s/#%s/g" "/etc/openvpn/authorized_users" ' % (client,client)) 
-    
-    #print(authorized)
+            print("\nDisabled Client: %s" % client)
+            #client.replace("%s","#%s" % (client,client)) 
+            #os.system('sed -i -e "s/\b%s\b/#%s/g" "/etc/openvpn/authorized_users" ' % (client,client)) 
+            os.system('sed -i -e "s/^%s$/#%s/g" "/etc/openvpn/authorized_users" ' % (client,client))
 
-def enable_client():
+def enable_client(removedata):
     for client in removedata:
         #print(client)
         os.chdir('/etc/openvpn/')
         #check if client name is in authorized_users already
         f = open('/etc/openvpn/authorized_users')
-        
+
         authorized = (f.read())
         if (client) in authorized:
             print("\nEnabled Client: %s" % client)
-            os.system('sed -i -e "s/#%s/%s/g" "/etc/openvpn/authorized_users" ' % (client,client)) 
-            
+            os.system('sed -i -e "s/^#%s$/%s/g" "/etc/openvpn/authorized_users" ' % (client,client))
+            #client.replace("%s","#%s" % client) 
         else:
             print("\nClient:%s not found!" % client)
-            continue 
-    #print(authorized)
-
-def create_client():
-    for name,last,to_email,role in userdata:
-        space = ( ' ' * 10)
-        if os.path.isfile('/etc/openvpn/easy-rsa/pki/reqs/%s.req' % name):
-            print("File already exist, going to next client...")
             continue
-        print (name,last,email)
-        print ("\n" + space + "----- Creating config for '%s' -----" % name)
+
+def push_ovpn(ovpn_filename):
+    ssh = "/usr/bin/ssh"
+    scp = "/usr/bin/scp"
+    user = "earnoth"
+    host = "10.20.31.78"
+    root_path = "/var/www/"
+    class_dir = "sec450"
+    source_dir = "/etc/openvpn/vpn_clients"
+    student_dir = str(random.random())[2:9]
+    web_dir = "%s/%s/%s" % (root_path, class_dir, student_dir)
+    destination = "%s@%s" % (user, host)
+    ssh_cmd = [ssh, destination, "mkdir", web_dir]
+    ssh_output = subprocess.run(ssh_cmd)
+    print(ssh_output)
+    scp_source = "/".join([source_dir, ovpn_filename])
+    scp_destination = "".join([destination, ":", web_dir, "/"])
+    scp_cmd = [scp, scp_source, scp_destination]
+    scp_output = subprocess.run(scp_cmd)
+    print(scp_output)
+    input("Press ENTER to continue")
+    url = "http://www.cyberwildcats.net/%s/%s/%s" % (class_dir, student_dir, ovpn_filename)
+    return url
+
+def create_client(userdata,server,sec450=False,noemail=False):
+    for name,last,twitter,to_email,role in userdata:
+        #print("###############################################################")
+        #print(name + '\n' + last + '\n' + twitter + '\n' + to_email + '\n' + role)
+        #print("###############################################################")
+        
+        name = name.lower().strip()
+        last = last.lower().strip()
+        to_email = to_email.lower()  
+        email_parts = to_email.split('@',1)
+        username = name+"."+last+"."+email_parts[0]
+        year = str(int(date.today().year) + 3)
+        fullname=".".join([username, year])
+       
+        space = ( ' ' * 10)
+        if os.path.isfile('/etc/openvpn/easy-rsa/pki/reqs/%s.req' % fullname):
+            print("Client already exists -> {} ".format(fullname))
+            continue
+        print (name,last,to_email)
+        print ("\n" + space + "----- Creating config for '%s' -----" % fullname)
         
         # Generating random password 4 words long, using mkpasswd.py as the source for the list
         listcount = len(pwlist)
@@ -140,34 +168,35 @@ def create_client():
         os.chdir('/etc/openvpn/easy-rsa')
         # Runs easyrsa arugment build-client-full and takes in the user name, then the stdin uses
         # the random generated password to push to PEM passpharse for client
-        os.system('echo "%s" ; echo "%s" | ./easyrsa build-client-full %s' % (password,password,name))
+        os.system('echo "%s" ; echo "%s" | ./easyrsa build-client-full %s' % (password,password,fullname))
         
         # newfile made for client cert and  moved cert info to %s.ovpn
-        newfile = open('/etc/openvpn/vpn_clients/%s.ovpn' % name, "w")
-        copyfile('/etc/openvpn/client-template.txt', '/etc/openvpn/vpn_clients/%s.ovpn' % name)
-        file = open('/etc/openvpn/vpn_clients/%s.ovpn' % name, "a")
+        newfile = open('/etc/openvpn/vpn_clients/%s.ovpn' % fullname, "w")
+        copyfile('/etc/openvpn/client-template.txt', '/etc/openvpn/vpn_clients/%s.ovpn' % fullname)
+        file = open('/etc/openvpn/vpn_clients/%s.ovpn' % fullname, "a")
         
         # Set an IP the user will receive
-        address = None # Need to give a range of IPS, then send the client to /etc/openvpn/ccd
+        address = None # Need to give a range of IPs, then send the client to /etc/openvpn/ccd
         
         # Read cert for server
         cert = open("/etc/openvpn/easy-rsa/pki/ca.crt","r")
         key1 = cert.read()
         cert.close()
         # Read cert for client 42-53
-        cert =  open("/etc/openvpn/easy-rsa/pki/issued/%s.crt" % name, "r")
+        cert =  open("/etc/openvpn/easy-rsa/pki/issued/%s.crt" % fullname, "r")
         lines = cert.readlines()
-        lines = lines[41:53]
+        lines = lines[41:54]
         key2 = ''.join(lines)
         cert.close()
         # Read cert key
-        cert = open("/etc/openvpn/easy-rsa/pki/private/%s.key" % name, "r")
+        cert = open("/etc/openvpn/easy-rsa/pki/private/%s.key" % fullname, "r")
         key3 = cert.read()
         cert.close()
         cert = open("/etc/openvpn/tls-crypt.key","r")
         key4 = cert.read()
         cert.close()
-        with open('/etc/openvpn/vpn_clients/%s.ovpn' % name, mode='a') as cert:
+        ovpn_filename = "%s.ovpn" % fullname
+        with open('/etc/openvpn/vpn_clients/%s' % ovpn_filename, mode='a') as cert:
                 cert.write('\n<ca>\n')
                 cert.write(key1)
                 cert.write('</ca>\n')
@@ -182,103 +211,76 @@ def create_client():
                 cert.write('</tls-crypt>\n')
 
         # Information for client, including: name, lastnaem, email, and password
-        client_info = open('/etc/openvpn/vpn_clients/%s.info' % name, "w")
-        with open('/etc/openvpn/vpn_clients/%s.info' % name, mode='a') as info:
+        client_info = open('/etc/openvpn/vpn_clients/%s.info' % fullname, "w")
+        with open('/etc/openvpn/vpn_clients/%s.info' % fullname, mode='a') as info:
             info.write('OpenVPN client information:\n------------------------------------')
-            info.write('\nUsername: ' + name + '\nLastname: ' + last + '\nEmail: ' + to_email)
+            info.write('\nFirstname: ' + name + '\nEvent: ' + last + '\nEmail: ' + to_email)
+            info.write('\nRole: ' + role + '\nTwitter: ' + twitter)
+            info.write('\n------------------------------------' + '\nUsername: ' + fullname)
             info.write('\nPassword: %s ' % password + '\n------------------------------------\n')
-        os.system(' echo "%s" >> "/etc/openvpn/authorized_users" ' % name)
+        os.system(' echo "%s" >> "/etc/openvpn/authorized_users" ' % fullname)
         
+        if sec450:
+            url = push_ovpn(ovpn_filename)
+            if noemail:
+                pass
+            else:
+                sendit(fullname, name, last, to_email, password, server, url)
         # Sends credentials and .ovpn to the specific email grabbed from the given textfile
-        sendit(name, last, to_email, password)
+        else:
+            if noemail:
+                pass
+            else:
+                print("Sending Client email with creds")
+                sendit(fullname, name, last, to_email, password, server)
 
-def sendit(name, last, to_email, password):
-    # Email Server 
-    # 10.20.31.78 = cyberwildcats.net
-    # 10.20.31.75 = prosversusjoes.net
-
-#    emtemp = open("/etc/openvpn/email-template.txt", "r")
-#    email_template = emtemp.read()
-
-    
-    
-    mailserver = "10.20.31.75"
-    #mailserver = "10.20.31.78"
-    fr_email = "dichotomy@prosversusjoes.net"
-    #fr_email = "earnoth@cyberwildcats.net"
-    #reply_email = "eric.i.arnoth@wilmu.edu"
-    reply_email = "dichotomy@prosversusjoes.net"
-    subj = "Your OpenVPN credentials for Cyberwildcats"
-    
-    email_template="""%s %s - here is your Username and PEM Password for VPN access.
-
-    OpenVPN Credentials:
-    Username:  %s
-    Password:  %s
-    
-
-    """
-
-    body = email_template % (name, last, name, password)
-    body = MIMEText(body)
-    msg = MIMEMultipart()
-    msg['Subject'] = subj
-    msg['From'] = fr_email
-    msg['To'] = to_email
-    msg['BCC'] = reply_email
-    msg['Reply-to'] = reply_email
-    msg['Date'] = email.utils.formatdate(localtime=True)
-    
-    attached_config = MIMEBase('application', "octet-stream")
-    attached_config.set_payload(open("/etc/openvpn/vpn_clients/%s.ovpn" % name, "rb").read())
-    encoders.encode_base64(attached_config)
-
-    attached_config.add_header('Content-Disposition', 'attachment; filename="%s.ovpn"' % name)
-
-    msg.attach(body)
-    msg.attach(attached_config) 
-    
-    s = smtplib.SMTP(mailserver)
-    print( "Sending mail to %s" % to_email)
-    s.sendmail(fr_email, [reply_email, to_email], msg.as_string())
-    s.quit()
-#    emtemp.close()
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-c", "--create", dest="clientFile", help="Open specified file to add clients")
+    parser.add_argument("-c", "--create", dest="clientFile", help="./mkclient.py -c userlist.txt <First,Last,Twiter,Email,Role>")
     parser.add_argument("-r", "--revoke", dest="removeFile", help="Open specified file to remove clients")
     parser.add_argument("-d", "--disable", dest="disableFile", help="Open specified file to disable clients")
     parser.add_argument("-e", "--enable", dest="enableFile", help="Open specified file to enable clients")
     parser.add_argument("-s", "--show",   action='store_true', help="Displays total number and names of active clients")
+    parser.add_argument("-S", "--server", default=None,  dest='server', help="Selects the email server")
+
+    parser.add_argument("--sec450", dest="sec450", action='store_true', default=False, 
+                                help="push OVPN files to cyberwildcats.net and send proper emails")
+    parser.add_argument("--noemail", dest="noemail", action='store_true', default=False,
+                                help="Do not send emails upon account generation")
+
     args = parser.parse_args()
     clientFile = args.clientFile
     disableFile = args.disableFile
     enableFile = args.enableFile
     removeFile = args.removeFile
+    server = args.server
+    sec450 = args.sec450
+    noemail = args.noemail
 
     #"Argument is = to -c or --create do:"
     if args.clientFile:
-        global userdata
         with open(clientFile) as f:
             userdata = [x.strip().split(',') for x in f.readlines()]
-        create_client()
+        if server == "cyberwildcats" or server == "PvJ":
+            create_client(userdata,args.server,sec450,noemail)
+        else:
+            sys.exit("invalid option, --server option must be 'cyberildcats' or 'PvJ'")
     #"Argument is = to -r or --revoke do:"
     elif args.removeFile:
-        global removedata
         with open(removeFile) as f:
             removedata = f.read().splitlines()
-        remove_client()
+        remove_client(removedata)
     #"Argument is = to -d or --disable do:"
     elif args.disableFile:
         with open(disableFile) as f:
             removedata = f.read().splitlines()
-        disable_client()
+        disable_client(removedata)
     
     #"Argument is = to -e or --enable do:"
     elif args.enableFile:
         with open(enableFile) as f:
             removedata = f.read().splitlines()
-        enable_client()
+        enable_client(removedata)
     #"Argument is = to -s or --show do:"
     elif args.show:
         check_client()
