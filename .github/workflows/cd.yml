@@ -1,0 +1,180 @@
+---
+name: 'Deployment'
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: [self-hosted, linux, x64]
+    environment: development
+
+    # Use the Bash shell regardless whether the GitHub Actions
+    # runner is ubuntu-latest, macos-latest, or windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      tf_output: ${{ steps.tf_output.outputs.stdout }}
+
+    steps:
+      # Checkout the repository to the GitHub Actions runner
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # Install the latest version of Terraform CLI and configure
+      # the Terraform CLI configuration file with a Terraform Cloud
+      # user API token
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # Initialize a new or existing Terraform working directory
+      # by creating initial files, loading any remote state,
+      # downloading modules, etc.
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+
+      # Executes Terraform Apply
+      - name: Terraform Apply
+        working-directory: ./terraform
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+          TF_VAR_PM_API_URL: ${{ secrets.PM_API_URL_DEV }}
+          TF_VAR_PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID_DEV }}
+          TF_VAR_PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET_DEV }}
+          # TF_LOG: debug
+        run: terraform apply -input=false -auto-approve
+
+      # Executes Terraform Output
+      - name: Terraform Output
+        working-directory: ./terraform
+        id: tf_output
+        env:
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+          TF_VAR_PM_API_URL: ${{ secrets.PM_API_URL_DEV }}
+          TF_VAR_PM_API_TOKEN_ID: ${{ secrets.PM_API_TOKEN_ID_DEV }}
+          TF_VAR_PM_API_TOKEN_SECRET: ${{ secrets.PM_API_TOKEN_SECRET_DEV }}
+          # TF_LOG: debug
+        run: terraform output -json
+
+    # Upload Ansible Deployment Artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ansible-deploy
+          path: ansible/deploy.yml
+
+    # Upload Ansible Inventory Artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ansible-inventory
+          path: ansible/inventory/
+
+
+  github_checkouts:
+    name: 'GitHub Checkouts'
+    runs-on: [acme]
+    environment: development
+    needs: terraform
+
+    strategy:
+      matrix:
+        roles: ${{ fromJSON(needs.terraform.outputs.tf_output).roles.value }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    # Checkout Ansible Role Repositories from GitHub
+      - name: Checkout Ansible Role Repositories from GitHub
+        working-directory: ./terraform
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.REPO_TOKEN }}
+          repository: CTFfactory/ansible-role-${{ matrix.roles.hyphen }}
+          path: ansible/roles/${{ matrix.roles.hyphen }}
+          ref: 'main'
+
+    # Upload ansible role artifacts
+      - uses: actions/upload-artifact@v4
+        working-directory: ./terraform
+        with:
+          name: ansible-role-${{ matrix.roles.hyphen }}
+          path: ansible/roles/${{ matrix.roles.hyphen }}
+
+  ansible:
+    name: 'Ansible'
+    runs-on: [acme]
+    environment: development
+    needs: github_checkouts
+#    needs: terraform
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+
+    # Download Ansible Deploy Artifacts
+      - name: Download Ansible Deploy Artifacts
+        working-directory: ./terraform
+        uses: actions/download-artifact@v4
+        with:
+          name: ansible-deploy
+          path: ansible/
+
+    # Download Ansible Roles Artifacts
+      - name: Download Roles Artifacts
+        working-directory: ./terraform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ansible-role-*
+          path: ansible/roles/
+
+    # Download Ansible Inventory Artifacts
+      - name: Download Ansible Inventory Artifacts
+        working-directory: ./terraform
+        uses: actions/download-artifact@v4
+        with:
+          name: ansible-inventory
+          path: ansible/inventory/
+
+    # Install Python 3.
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+
+      - name: Install Ansible
+        run: |
+          pip install ansible --user 
+
+    # Prepare SSH Authentication Key
+      - name: SSH Key
+        run: |
+          echo "${{ secrets.RUNNER_SSH_KEY }}" > /tmp/runner-ssh-key
+          chmod 600 /tmp/runner-ssh-key
+
+    # Ansible Playbook
+      - name: Ansible Playbook
+        working-directory: ./terraform
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: False
+          RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+        run: |
+          # Run ansible-playbook command using the temporary file
+          /home/ghrunner/.local/bin/ansible-playbook --ssh-common-args '-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' --private-key=/tmp/runner-ssh-key -i ./ansible/inventory/infra ./ansible/deploy.yml
+
+          # Remove the SSH key file after the playbook execution
+          rm -f /tmp/runner-ssh-key
